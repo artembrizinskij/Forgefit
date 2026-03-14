@@ -258,27 +258,46 @@ docker compose up -d --build
 
 Для продакшена замените на реальную СУБД:
 
-1. Создайте файл коннектора, реализующий интерфейс `IDatabase` из `server/src/db/interface.ts`:
+1. Создайте класс, реализующий интерфейс `IDatabase` из `server/Forgefit.Api/Database/IDatabase.cs`:
 
-```typescript
-// server/src/db/postgres.ts  (пример)
-import { IDatabase } from './interface.js'
+```csharp
+// server/Forgefit.Api/Database/PostgresDatabase.cs  (пример)
+using Npgsql;
 
-export class PostgresDatabase implements IDatabase {
-  // реализуйте все методы интерфейса через pg/prisma/drizzle
+public class PostgresDatabase : IDatabase
+{
+    private readonly string _connectionString;
+    public PostgresDatabase(string connectionString) => _connectionString = connectionString;
+
+    // Реализуйте все методы интерфейса через Npgsql / Dapper / EF Core
+    public async Task<User?> FindUserByEmailAsync(string email) { ... }
+    // ...
 }
 ```
 
-2. Обновите `server/src/db/index.ts`:
+2. Зарегистрируйте новую реализацию в `Program.cs`:
 
-```typescript
-import { PostgresDatabase } from './postgres.js'
-export const db = new PostgresDatabase()
+```csharp
+// Вместо:
+builder.Services.AddSingleton<IDatabase, InMemoryDatabase>();
+
+// Используйте:
+var connStr = Environment.GetEnvironmentVariable("DATABASE_URL")!;
+builder.Services.AddSingleton<IDatabase>(new PostgresDatabase(connStr));
 ```
 
-3. Добавьте переменную `DATABASE_URL` в `.env` и в сервис `server` в `docker-compose.yml`.
+3. Добавьте переменную `DATABASE_URL` в `.env` и в сервис `server` в `docker-compose.yml`:
 
-Поддерживаемые коннекторы (примеры): PostgreSQL (pg, Prisma, Drizzle), MongoDB (mongoose), SQLite (better-sqlite3).
+```yaml
+server:
+  environment:
+    DATABASE_URL: "Host=db;Database=forgefit;Username=user;Password=pass"
+```
+
+Рекомендуемые пакеты NuGet:
+- **PostgreSQL**: `Npgsql` + `Dapper` или `Npgsql.EntityFrameworkCore.PostgreSQL`
+- **SQLite**: `Microsoft.EntityFrameworkCore.Sqlite`
+- **MongoDB**: `MongoDB.Driver`
 
 ---
 
@@ -304,25 +323,29 @@ forgefit/
 │   ├── router/index.ts         # Vue Router (guards авторизации)
 │   └── App.vue                 # Shell: топ-бар, навигация, кнопка выхода
 │
-├── server/                     # Express API (Node.js + TypeScript)
-│   ├── src/
-│   │   ├── db/
-│   │   │   ├── interface.ts    # Абстрактный интерфейс БД
-│   │   │   ├── inMemory.ts     # In-memory реализация (по умолчанию)
-│   │   │   └── index.ts        # Синглтон БД (замените коннектор здесь)
-│   │   ├── middleware/
-│   │   │   ├── auth.ts         # JWT-middleware
-│   │   │   └── errorHandler.ts # Глобальная обработка ошибок
-│   │   ├── routes/
-│   │   │   ├── auth.ts         # POST /register, POST /login, GET /me
-│   │   │   ├── exercises.ts    # CRUD /exercises
-│   │   │   └── workouts.ts     # /workouts: сессии, подходы, история
-│   │   ├── types/index.ts      # TypeScript-типы сервера
-│   │   ├── config.ts           # Конфигурация из env
-│   │   ├── app.ts              # Express app
-│   │   └── index.ts            # Точка входа сервера
-│   ├── Dockerfile              # Многоэтапная сборка Node.js
-│   └── package.json
+├── server/                     # ASP.NET Core 8 Web API (C#)
+│   ├── Forgefit.Api/
+│   │   ├── Forgefit.Api.csproj
+│   │   ├── Program.cs          # Точка входа, DI, JWT, CORS
+│   │   ├── appsettings.json    # Конфигурация по умолчанию
+│   │   ├── Models/
+│   │   │   ├── User.cs         # User, PublicUser
+│   │   │   ├── Exercise.cs     # Exercise, ExerciseParams
+│   │   │   ├── Workout.cs      # WorkoutSession, WorkoutSet
+│   │   │   └── Dtos.cs         # Request/Response DTO-объекты
+│   │   ├── Database/
+│   │   │   ├── IDatabase.cs    # Абстрактный интерфейс БД
+│   │   │   └── InMemoryDatabase.cs # In-memory реализация (по умолчанию)
+│   │   ├── Infrastructure/
+│   │   │   ├── JwtSettings.cs  # JWT-конфигурация
+│   │   │   └── HttpException.cs # Исключение с HTTP-статусом
+│   │   ├── Controllers/
+│   │   │   ├── AuthController.cs      # POST /register, POST /login, GET /me
+│   │   │   ├── ExercisesController.cs # CRUD /exercises
+│   │   │   └── WorkoutsController.cs  # /workouts: сессии, подходы, история
+│   │   └── Middleware/
+│   │       └── ErrorHandlingMiddleware.cs # Глобальная обработка ошибок → JSON
+│   └── Dockerfile              # Многоэтапная сборка .NET SDK → ASP.NET runtime
 │
 ├── Dockerfile                  # Фронтенд: Node build → nginx
 ├── nginx.conf                  # nginx: SPA + /api proxy
