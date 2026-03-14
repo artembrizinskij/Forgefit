@@ -13,7 +13,7 @@ public sealed class InMemoryDatabase : IDatabase
     private readonly List<User> _users = [];
     private readonly List<Exercise> _exercises = [];
     private readonly List<WorkoutSession> _sessions = [];
-    private readonly Lock _lock = new();
+    private readonly object _lock = new();
 
     private static string NewId() => Guid.NewGuid().ToString();
     private static string NowIso() => DateTime.UtcNow.ToString("O");
