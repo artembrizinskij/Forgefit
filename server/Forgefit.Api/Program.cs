@@ -15,7 +15,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET")
     ?? builder.Configuration["Jwt:Secret"]
-    ?? "dev-secret-change-in-production";
+    ?? "dev-secret-change-in-production!x1"; // min 32 chars (256 bit) for HS256
 
 var jwtExpiresIn = Environment.GetEnvironmentVariable("JWT_EXPIRES_IN")
     ?? builder.Configuration["Jwt:ExpiresIn"]
