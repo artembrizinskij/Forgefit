@@ -101,6 +101,7 @@ app.MapGet("/api/health", () => Results.Ok(new
 
 app.MapControllers();
 
-// Honour the PORT env var (Docker sets this)
-var port = Environment.GetEnvironmentVariable("PORT") ?? "3000";
-app.Run($"http://0.0.0.0:{port}");
+// URL binding priority:
+//   1. ASPNETCORE_URLS env var  (set in Docker: http://0.0.0.0:3000)
+//   2. launchSettings.json      (local dev:     http://localhost:5000)
+app.Run();
