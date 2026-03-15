@@ -1,0 +1,46 @@
+# Production compose — images are pulled from GHCR, NOT built on the server.
+# Used by the GitHub Actions deploy job.
+# On the server: copy this file + .env, then run:
+#   docker compose -f docker-compose.prod.yml up -d
+
+version: "3.9"
+
+services:
+  # ── Backend API ──────────────────────────────────────────────────────────
+  server:
+    image: ghcr.io/artembrizinskij/forgefit-server:latest
+    container_name: forgefit-api
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_URLS:        "http://0.0.0.0:3000"
+      ASPNETCORE_ENVIRONMENT: "Production"
+      JWT_SECRET:             "${JWT_SECRET}"
+      JWT_EXPIRES_IN:         "${JWT_EXPIRES_IN:-7d}"
+      CORS_ORIGIN:            "${CORS_ORIGIN:-http://localhost}"
+      DB_TYPE:                "xlsx"
+      DB_DATA_DIR:            "/app/data"
+    volumes:
+      - forgefit_data:/app/data   # xlsx files persist across restarts / updates
+    expose:
+      - "3000"
+    networks:
+      - forgefit
+
+  # ── Frontend (nginx + Vue SPA) ───────────────────────────────────────────
+  frontend:
+    image: ghcr.io/artembrizinskij/forgefit-frontend:latest
+    container_name: forgefit-frontend
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-80}:80"
+    depends_on:
+      - server
+    networks:
+      - forgefit
+
+networks:
+  forgefit:
+    driver: bridge
+
+volumes:
+  forgefit_data:   # persistent xlsx storage
