@@ -1,23 +1,14 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using Forgefit.Api.Database;
-using Forgefit.Api.Infrastructure;
-using Forgefit.Api.Models;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 
-namespace Forgefit.Api.Controllers;
+namespace Forgefit.Api.Services;
 
-[ApiController]
-[Route("api/auth")]
-public sealed class AuthController(IDatabase db, JwtSettings jwt) : ControllerBase
+/// <summary>Handles user registration, login, and JWT generation.</summary>
+public sealed class AuthService(IDatabase db, JwtSettings jwt)
 {
-    // ── POST /api/auth/register ───────────────────────────────────────────────
-
-    [HttpPost("register")]
-    public async Task<IActionResult> Register([FromBody] RegisterRequest req)
+    public async Task<AuthResponse> RegisterAsync(RegisterRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.Email))
             throw new HttpException(400, "Email обязателен");
@@ -33,13 +24,10 @@ public sealed class AuthController(IDatabase db, JwtSettings jwt) : ControllerBa
         var hash = BCrypt.Net.BCrypt.HashPassword(req.Password);
         var user = await db.CreateUserAsync(req.Email, hash, req.Name);
 
-        return StatusCode(201, new AuthResponse(GenerateToken(user), ToPublic(user)));
+        return new AuthResponse(GenerateToken(user), ToPublic(user));
     }
 
-    // ── POST /api/auth/login ──────────────────────────────────────────────────
-
-    [HttpPost("login")]
-    public async Task<IActionResult> Login([FromBody] LoginRequest req)
+    public async Task<AuthResponse> LoginAsync(LoginRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Password))
             throw new HttpException(400, "Email и пароль обязательны");
@@ -48,27 +36,16 @@ public sealed class AuthController(IDatabase db, JwtSettings jwt) : ControllerBa
         if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
             throw new HttpException(401, "Неверный email или пароль");
 
-        return Ok(new AuthResponse(GenerateToken(user), ToPublic(user)));
+        return new AuthResponse(GenerateToken(user), ToPublic(user));
     }
 
-    // ── GET /api/auth/me ──────────────────────────────────────────────────────
-
-    [Authorize]
-    [HttpGet("me")]
-    public async Task<IActionResult> Me()
+    public async Task<PublicUser> GetCurrentUserAsync(string userId)
     {
-        var userId = GetUserId();
         var user = await db.FindUserByIdAsync(userId)
             ?? throw new HttpException(401, "Пользователь не найден");
 
-        return Ok(new { user = ToPublic(user) });
+        return ToPublic(user);
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private string GetUserId() =>
-        User.FindFirstValue("userId")
-        ?? throw new HttpException(401, "Требуется авторизация");
 
     private string GenerateToken(User user)
     {
@@ -84,7 +61,7 @@ public sealed class AuthController(IDatabase db, JwtSettings jwt) : ControllerBa
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    private static PublicUser ToPublic(User u) => new()
+    public static PublicUser ToPublic(User u) => new()
     {
         Id = u.Id,
         Email = u.Email,

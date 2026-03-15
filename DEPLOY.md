@@ -3,34 +3,37 @@
 ## Архитектура
 
 ```
-┌─────────────────────────────────────────────────┐
-│               Docker Compose                    │
-│                                                 │
-│  ┌──────────────┐     ┌──────────────────────┐  │
-│  │   frontend   │     │        server        │  │
-│  │  nginx:80    │────▶│  Node.js API :3000   │  │
-│  │  Vue SPA     │     │  Express + JWT       │  │
-│  └──────────────┘     └──────────────────────┘  │
-│         │                                       │
-└─────────┼───────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│                  Docker Compose                  │
+│                                                  │
+│  ┌───────────────┐     ┌──────────────────────┐  │
+│  │   frontend    │     │        server        │  │
+│  │  nginx :80    │────▶│  ASP.NET Core 8 API  │  │
+│  │  Vue 3 SPA    │     │  C# + JWT  :3000     │  │
+│  └───────────────┘     └──────────┬───────────┘  │
+│         │                         │              │
+│         │                  volume: forgefit_data │
+│         │                  /app/data/*.xlsx       │
+└─────────┼────────────────────────────────────────┘
           │ порт 80 (или APP_PORT)
     Интернет / браузер
 ```
 
-- **frontend** — nginx, раздаёт собранный Vue SPA и проксирует `/api/` на backend
-- **server** — Express API, работает внутри Docker-сети (не открыт наружу напрямую)
-- Все данные хранятся в памяти сервера (in-memory DB, заменяется на реальную СУБД)
+- **frontend** — nginx раздаёт Vue 3 SPA и проксирует `/api/` на бэкенд
+- **server** — ASP.NET Core 8 Web API (C#), работает внутри Docker-сети
+- **xlsx-база** — каждый пользователь получает свой `.xlsx` файл, данные хранятся в Docker volume
 
 ---
 
-## Требования
+## Требования к серверу
 
-| Инструмент | Минимальная версия |
+| Компонент | Минимум |
 |---|---|
 | Linux (Ubuntu 22.04 / Debian 12) | — |
 | Docker Engine | ≥ 24.0 |
 | Docker Compose plugin | ≥ 2.20 |
-| Открытый порт на сервере | 80 (или другой) |
+| RAM | 512 MB |
+| Открытый порт | 80 (или другой) |
 
 ---
 
@@ -41,7 +44,7 @@
 sudo apt update && sudo apt upgrade -y
 
 # Зависимости
-sudo apt install -y ca-certificates curl gnupg lsb-release
+sudo apt install -y ca-certificates curl gnupg
 
 # GPG-ключ Docker
 sudo install -m 0755 -d /etc/apt/keyrings
@@ -51,7 +54,7 @@ sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
 # Репозиторий Docker
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-  https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+  https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
   | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
 # Docker Engine + Compose plugin
@@ -59,151 +62,167 @@ sudo apt update
 sudo apt install -y docker-ce docker-ce-cli containerd.io \
                    docker-buildx-plugin docker-compose-plugin
 
-# Разрешить текущему пользователю запускать docker без sudo
+# Разрешить запускать Docker без sudo
 sudo usermod -aG docker $USER
 newgrp docker
 
 # Проверка
-docker --version
-docker compose version
+docker --version        # Docker version 26.x.x
+docker compose version  # Docker Compose version v2.x.x
 ```
 
 ---
 
-## 2. Получение кода на сервере
+## 2. Получение кода
 
 ### Вариант A — клонирование из Git
 
 ```bash
-git clone <URL_репозитория> forgefit
+git clone https://github.com/artembrizinskij/Forgefit.git forgefit
 cd forgefit
 ```
 
-### Вариант B — загрузка через scp / rsync
+### Вариант B — загрузка через rsync с локальной машины
 
 ```bash
-# С локальной машины:
-rsync -avz --exclude node_modules --exclude .git \
-  ./forgefit/ user@your-server-ip:/home/user/forgefit/
+# С локальной машины (Git Bash / WSL):
+rsync -avz \
+  --exclude node_modules \
+  --exclude .git \
+  --exclude 'server/Forgefit.Api/bin' \
+  --exclude 'server/Forgefit.Api/obj' \
+  --exclude 'server/Forgefit.Api/data' \
+  ./forgefit/ user@YOUR_SERVER_IP:/home/user/forgefit/
 
-# На сервере:
 cd /home/user/forgefit
 ```
 
 ---
 
-## 3. Конфигурация окружения
-
-Скопируйте шаблон и заполните переменные:
+## 3. Конфигурация
 
 ```bash
 cp .env.example .env
 nano .env
 ```
 
-Содержимое `.env`:
+Минимальный `.env` для продакшена:
 
 ```env
-# ОБЯЗАТЕЛЬНО — изменить JWT_SECRET перед продакшен-запуском!
-JWT_SECRET=ваш-длинный-случайный-секрет-минимум-32-символа
-
+# Обязательно — минимум 32 символа!
+JWT_SECRET=$(openssl rand -base64 32)
 JWT_EXPIRES_IN=7d
 
-# Порт, на котором будет доступно приложение (по умолчанию 80)
+# Порт (по умолчанию 80)
 APP_PORT=80
 
-# CORS — укажите ваш домен (если используете обратный прокси с доменом)
-CORS_ORIGIN=http://your-domain.com
+# Ваш домен или IP
+CORS_ORIGIN=http://YOUR_SERVER_IP
 ```
 
-> ⚠️ **Никогда не коммитьте `.env` в репозиторий.** Файл добавлен в `.gitignore`.
+> ⚠️ **Никогда не коммитьте `.env` в репозиторий.**
 
 ---
 
 ## 4. Сборка и запуск
 
 ```bash
-# Собрать образы и запустить в фоне
 docker compose up -d --build
 ```
 
-Приложение будет доступно по адресу:
-
-```
-http://<IP-сервера>          (порт 80 по умолчанию)
-http://<IP-сервера>:8080     (если задали APP_PORT=8080)
-```
-
-### Проверка работы API
-
-```bash
-curl http://localhost/api/health
-# {"status":"ok","timestamp":"..."}
-```
-
----
-
-## 5. Управление контейнерами
+Первая сборка занимает 3–5 минут (скачивает .NET SDK и Node.js образы).
 
 ```bash
 # Статус контейнеров
 docker compose ps
 
-# Логи всех сервисов (в реальном времени)
+# Проверка API
+curl http://localhost/api/health
+# {"status":"ok","timestamp":"..."}
+
+# Логи в реальном времени
 docker compose logs -f
+```
 
-# Логи только бэкенда
-docker compose logs -f server
-
-# Логи только фронтенда
-docker compose logs -f frontend
-
-# Остановить без удаления
-docker compose stop
-
-# Остановить и удалить контейнеры
-docker compose down
-
-# Перезапустить после изменения кода
-docker compose up -d --build
+Приложение доступно по адресу:
+```
+http://YOUR_SERVER_IP       (порт 80)
+http://YOUR_SERVER_IP:8080  (если APP_PORT=8080)
 ```
 
 ---
 
-## 6. Регистрация первого пользователя
+## 5. Управление данными (xlsx)
 
-После запуска откройте приложение в браузере и зарегистрируйтесь через форму.
-Каждый пользователь видит только свои упражнения и тренировки.
+Все данные хранятся в Docker volume `forgefit_data` → `/app/data/` внутри контейнера.
 
-Через API (curl):
+Структура:
+```
+/app/data/
+├── _users.xlsx              # реестр всех пользователей
+├── {userId-1}.xlsx          # данные пользователя 1
+│     Sheet "_Exercises"     # каталог упражнений
+│     Sheet "_Sessions"      # список тренировок
+│     Sheet "Bench Press"    # подходы (одна строка = один подход)
+│     Sheet "Squat"
+└── {userId-2}.xlsx          # данные пользователя 2
+```
+
+### Резервное копирование
 
 ```bash
-curl -X POST http://localhost/api/auth/register \
+# Создать архив
+docker run --rm \
+  -v forgefit_forgefit_data:/data \
+  -v $(pwd):/backup \
+  alpine tar czf /backup/forgefit-backup-$(date +%Y%m%d).tar.gz -C /data .
+
+# Восстановить
+docker run --rm \
+  -v forgefit_forgefit_data:/data \
+  -v $(pwd):/backup \
+  alpine tar xzf /backup/forgefit-backup-YYYYMMDD.tar.gz -C /data
+```
+
+---
+
+## 6. Управление контейнерами
+
+```bash
+docker compose ps                  # статус
+docker compose logs -f             # все логи
+docker compose logs -f server      # логи бэкенда
+docker compose logs -f frontend    # логи фронтенда
+docker compose stop                # остановить
+docker compose down                # удалить контейнеры (данные в volume сохраняются)
+docker compose down -v             # удалить всё вместе с данными (ОСТОРОЖНО!)
+docker compose up -d --build       # пересобрать и перезапустить
+```
+
+---
+
+## 7. Регистрация первого пользователя
+
+Откройте `http://YOUR_SERVER_IP` в браузере и зарегистрируйтесь через форму.
+
+Через curl:
+```bash
+curl -X POST http://YOUR_SERVER_IP/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@example.com","password":"securepassword","name":"Admin"}'
 ```
 
 ---
 
-## 7. Настройка HTTPS с доменом (Certbot + Nginx на хосте)
-
-Если у вас есть домен и вы хотите HTTPS:
+## 8. HTTPS с Certbot (если есть домен)
 
 ```bash
-# Установить Nginx на хост
-sudo apt install -y nginx
+sudo apt install -y nginx certbot python3-certbot-nginx
 
-# Создать конфиг сайта
-sudo nano /etc/nginx/sites-available/forgefit
-```
-
-Содержимое конфига:
-
-```nginx
+sudo tee /etc/nginx/sites-available/forgefit << 'EOF'
 server {
     listen 80;
     server_name your-domain.com www.your-domain.com;
-
     location / {
         proxy_pass         http://127.0.0.1:80;
         proxy_http_version 1.1;
@@ -213,152 +232,86 @@ server {
         proxy_set_header   X-Forwarded-Proto $scheme;
     }
 }
-```
+EOF
 
-```bash
-# Включить сайт
 sudo ln -s /etc/nginx/sites-available/forgefit /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
-
-# Получить SSL-сертификат
-sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d your-domain.com -d www.your-domain.com
 ```
 
-> Не забудьте в `.env` обновить `CORS_ORIGIN=https://your-domain.com` и пересобрать контейнеры.
-
----
-
-## 8. Автозапуск при перезагрузке
-
-Политика `restart: unless-stopped` уже настроена в `docker-compose.yml`.
-Убедитесь, что Docker стартует вместе с системой:
-
-```bash
-sudo systemctl enable docker
+После сертификата обновите `.env` и пересоберите:
+```env
+CORS_ORIGIN=https://your-domain.com
+APP_PORT=8080
 ```
-
----
-
-## 9. Обновление приложения
-
 ```bash
-# Получить обновления
-git pull
-
-# Пересобрать образы и перезапустить
 docker compose up -d --build
 ```
 
 ---
 
-## 10. Подключение реальной базы данных
+## 9. Автозапуск при перезагрузке
 
-Текущая реализация использует **in-memory хранилище** (данные сбрасываются при перезапуске сервера).
+```bash
+sudo systemctl enable docker
+```
 
-Для продакшена замените на реальную СУБД:
+Политика `restart: unless-stopped` в `docker-compose.yml` обеспечивает автоперезапуск контейнеров.
 
-1. Создайте класс, реализующий интерфейс `IDatabase` из `server/Forgefit.Api/Database/IDatabase.cs`:
+---
+
+## 10. Обновление приложения
+
+```bash
+cd /home/user/forgefit
+git pull
+docker compose up -d --build
+```
+
+Данные в volume **не затрагиваются** при пересборке образов.
+
+---
+
+## 11. Переход на другую СУБД
+
+Для перехода на PostgreSQL/SQLite/MongoDB:
+
+1. Реализуйте интерфейс `IDatabase` (`server/Forgefit.Api/Database/IDatabase.cs`):
 
 ```csharp
-// server/Forgefit.Api/Database/PostgresDatabase.cs  (пример)
-using Npgsql;
-
+// server/Forgefit.Api/Database/PostgresDatabase.cs
 public class PostgresDatabase : IDatabase
 {
-    private readonly string _connectionString;
-    public PostgresDatabase(string connectionString) => _connectionString = connectionString;
-
-    // Реализуйте все методы интерфейса через Npgsql / Dapper / EF Core
-    public async Task<User?> FindUserByEmailAsync(string email) { ... }
-    // ...
+    // реализуйте все методы через Npgsql / Dapper / EF Core
 }
 ```
 
-2. Зарегистрируйте новую реализацию в `Program.cs`:
+2. Замените регистрацию в `Program.cs`:
 
 ```csharp
-// Вместо:
-builder.Services.AddSingleton<IDatabase, InMemoryDatabase>();
-
-// Используйте:
+// вместо XlsxDatabase:
 var connStr = Environment.GetEnvironmentVariable("DATABASE_URL")!;
 builder.Services.AddSingleton<IDatabase>(new PostgresDatabase(connStr));
 ```
 
-3. Добавьте переменную `DATABASE_URL` в `.env` и в сервис `server` в `docker-compose.yml`:
-
-```yaml
-server:
-  environment:
-    DATABASE_URL: "Host=db;Database=forgefit;Username=user;Password=pass"
+3. Добавьте в `.env`:
+```env
+DB_TYPE=postgres
+DATABASE_URL=Host=db;Database=forgefit;Username=user;Password=pass
 ```
 
-Рекомендуемые пакеты NuGet:
-- **PostgreSQL**: `Npgsql` + `Dapper` или `Npgsql.EntityFrameworkCore.PostgreSQL`
-- **SQLite**: `Microsoft.EntityFrameworkCore.Sqlite`
-- **MongoDB**: `MongoDB.Driver`
+Рекомендуемые NuGet-пакеты:
+| СУБД | Пакет |
+|---|---|
+| PostgreSQL | `Npgsql` + `Dapper` |
+| SQLite | `Microsoft.EntityFrameworkCore.Sqlite` |
+| MongoDB | `MongoDB.Driver` |
 
 ---
 
-## Структура проекта
+## API-справочник
 
-```
-forgefit/
-├── src/                        # Vue 3 фронтенд
-│   ├── api/                    # HTTP-клиент для запросов к API
-│   │   ├── client.ts           # Базовый fetch-wrapper с авторизацией
-│   │   ├── auth.ts             # Эндпоинты авторизации
-│   │   ├── exercises.ts        # Эндпоинты упражнений
-│   │   └── workouts.ts         # Эндпоинты тренировок
-│   ├── stores/                 # Pinia-сторы
-│   │   ├── auth.ts             # Авторизация (токен, пользователь)
-│   │   ├── exercises.ts        # Кеш упражнений (загружается с API)
-│   │   └── workouts.ts         # Сессии тренировок (загружаются с API)
-│   ├── views/
-│   │   ├── AuthView.vue        # Экран входа / регистрации
-│   │   ├── WorkoutView.vue     # Основной экран тренировки
-│   │   ├── ExercisesView.vue   # Список упражнений
-│   │   └── ExerciseEditView.vue # Создание / редактирование упражнения
-│   ├── router/index.ts         # Vue Router (guards авторизации)
-│   └── App.vue                 # Shell: топ-бар, навигация, кнопка выхода
-│
-├── server/                     # ASP.NET Core 8 Web API (C#)
-│   ├── Forgefit.Api/
-│   │   ├── Forgefit.Api.csproj
-│   │   ├── Program.cs          # Точка входа, DI, JWT, CORS
-│   │   ├── appsettings.json    # Конфигурация по умолчанию
-│   │   ├── Models/
-│   │   │   ├── User.cs         # User, PublicUser
-│   │   │   ├── Exercise.cs     # Exercise, ExerciseParams
-│   │   │   ├── Workout.cs      # WorkoutSession, WorkoutSet
-│   │   │   └── Dtos.cs         # Request/Response DTO-объекты
-│   │   ├── Database/
-│   │   │   ├── IDatabase.cs    # Абстрактный интерфейс БД
-│   │   │   └── InMemoryDatabase.cs # In-memory реализация (по умолчанию)
-│   │   ├── Infrastructure/
-│   │   │   ├── JwtSettings.cs  # JWT-конфигурация
-│   │   │   └── HttpException.cs # Исключение с HTTP-статусом
-│   │   ├── Controllers/
-│   │   │   ├── AuthController.cs      # POST /register, POST /login, GET /me
-│   │   │   ├── ExercisesController.cs # CRUD /exercises
-│   │   │   └── WorkoutsController.cs  # /workouts: сессии, подходы, история
-│   │   └── Middleware/
-│   │       └── ErrorHandlingMiddleware.cs # Глобальная обработка ошибок → JSON
-│   └── Dockerfile              # Многоэтапная сборка .NET SDK → ASP.NET runtime
-│
-├── Dockerfile                  # Фронтенд: Node build → nginx
-├── nginx.conf                  # nginx: SPA + /api proxy
-├── docker-compose.yml          # Оркестрация: frontend + server
-├── .env.example                # Шаблон переменных окружения
-└── DEPLOY.md                   # Эта инструкция
-```
-
----
-
-## API-эндпоинты (краткий справочник)
-
-| Метод | URL | Описание | Авторизация |
+| Метод | URL | Описание | Auth |
 |---|---|---|---|
 | POST | `/api/auth/register` | Регистрация | — |
 | POST | `/api/auth/login` | Вход | — |

@@ -19,11 +19,14 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runner
 
 WORKDIR /app
 
-# Non-root user for security
-RUN adduser --disabled-password --gecos "" appuser && chown -R appuser /app
+# Non-root user for security; pre-create /app/data so xlsx files can be written
+RUN adduser --disabled-password --gecos "" appuser \
+    && mkdir -p /app/data \
+    && chown -R appuser:appuser /app
+
 USER appuser
 
-COPY --from=builder /app/publish .
+COPY --from=builder --chown=appuser:appuser /app/publish .
 
 EXPOSE 3000
 

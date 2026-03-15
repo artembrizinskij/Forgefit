@@ -2,14 +2,17 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Forgefit.Api.Database;
+using Forgefit.Api.Endpoints;
 using Forgefit.Api.Infrastructure;
 using Forgefit.Api.Middleware;
+using Forgefit.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ── Configuration ────────────────────────────────────────────────────────────
+// ── Configuration ─────────────────────────────────────────────────────────────
 // Environment variables override appsettings.json values.
 // Docker / production sets: JWT_SECRET, JWT_EXPIRES_IN, CORS_ORIGIN, PORT
 
@@ -27,17 +30,16 @@ var corsOrigins = (
     ?? "http://localhost:5173"
 ).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 
-// Expose settings to controllers via DI
+// ── Settings ──────────────────────────────────────────────────────────────────
 builder.Services.AddSingleton(new JwtSettings(jwtSecret, jwtExpiresIn));
 
-// ── Controllers & JSON ────────────────────────────────────────────────────────
-builder.Services.AddControllers()
-    .AddJsonOptions(opts =>
-    {
-        opts.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-        opts.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
-        opts.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
-    });
+// ── JSON ──────────────────────────────────────────────────────────────────────
+builder.Services.ConfigureHttpJsonOptions(opts =>
+{
+    opts.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    opts.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+    opts.SerializerOptions.PropertyNameCaseInsensitive = true;
+});
 
 // ── JWT Authentication ────────────────────────────────────────────────────────
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -60,8 +62,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             {
                 ctx.HandleResponse();
                 ctx.Response.StatusCode = 401;
-                ctx.Response.ContentType = "application/json";
-                return ctx.Response.WriteAsync("{\"error\":\"Требуется авторизация\"}");
+                ctx.Response.ContentType = "application/problem+json";
+                return ctx.Response.WriteAsync(
+                    """{"type":"https://httpstatuses.com/401","title":"Unauthorized","status":401,"detail":"Требуется авторизация"}""");
             },
         };
     });
@@ -83,11 +86,11 @@ builder.Services.AddCors(opts =>
 // DB_TYPE=xlsx    → Excel files in DB_DATA_DIR (default, persistent)
 //
 // To add a real DB: implement IDatabase and register it below.
-var dbType   = (Environment.GetEnvironmentVariable("DB_TYPE")
+var dbType = (Environment.GetEnvironmentVariable("DB_TYPE")
     ?? builder.Configuration["Database:Type"]
     ?? "xlsx").ToLowerInvariant();
 
-var dataDir  = Environment.GetEnvironmentVariable("DB_DATA_DIR")
+var dataDir = Environment.GetEnvironmentVariable("DB_DATA_DIR")
     ?? builder.Configuration["Database:DataDir"]
     ?? "data";
 
@@ -96,22 +99,64 @@ if (dbType == "memory")
 else
     builder.Services.AddSingleton<IDatabase>(_ => new XlsxDatabase(dataDir));
 
+// ── Services ──────────────────────────────────────────────────────────────────
+builder.Services.AddSingleton<AuthService>();
+builder.Services.AddSingleton<ExerciseService>();
+builder.Services.AddSingleton<WorkoutService>();
+
+// ── Swagger / OpenAPI ─────────────────────────────────────────────────────────
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo { Title = "Forgefit API", Version = "v1" });
+
+    // JWT bearer auth in Swagger UI
+    var bearerScheme = new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Description = "Enter: Bearer {token}",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        Reference = new OpenApiReference
+        {
+            Id = JwtBearerDefaults.AuthenticationScheme,
+            Type = ReferenceType.SecurityScheme,
+        },
+    };
+
+    c.AddSecurityDefinition(JwtBearerDefaults.AuthenticationScheme, bearerScheme);
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        { bearerScheme, Array.Empty<string>() },
+    });
+});
+
 // ── App pipeline ──────────────────────────────────────────────────────────────
 var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
 
 app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Health check
-app.MapGet("/api/health", () => Results.Ok(new
+// ── Endpoints ─────────────────────────────────────────────────────────────────
+app.MapGet("/api/health", () => TypedResults.Ok(new
 {
     status = "ok",
     timestamp = DateTime.UtcNow.ToString("O"),
-}));
+})).WithTags("Health").WithSummary("Health check");
 
-app.MapControllers();
+app.MapAuthEndpoints();
+app.MapExerciseEndpoints();
+app.MapWorkoutEndpoints();
 
 // URL binding priority:
 //   1. ASPNETCORE_URLS env var  (set in Docker: http://0.0.0.0:3000)
