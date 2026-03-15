@@ -78,11 +78,23 @@ builder.Services.AddCors(opts =>
     )
 );
 
-// ── Database (swap implementation here for a real DB) ─────────────────────────
-// To use a different database, replace InMemoryDatabase with your implementation:
-//   builder.Services.AddSingleton<IDatabase, PostgresDatabase>();
-//   builder.Services.AddSingleton<IDatabase, MongoDatabase>();
-builder.Services.AddSingleton<IDatabase, InMemoryDatabase>();
+// ── Database ───────────────────────────────────────────────────────────────────
+// DB_TYPE=memory  → volatile in-process store (default for tests)
+// DB_TYPE=xlsx    → Excel files in DB_DATA_DIR (default, persistent)
+//
+// To add a real DB: implement IDatabase and register it below.
+var dbType   = (Environment.GetEnvironmentVariable("DB_TYPE")
+    ?? builder.Configuration["Database:Type"]
+    ?? "xlsx").ToLowerInvariant();
+
+var dataDir  = Environment.GetEnvironmentVariable("DB_DATA_DIR")
+    ?? builder.Configuration["Database:DataDir"]
+    ?? "data";
+
+if (dbType == "memory")
+    builder.Services.AddSingleton<IDatabase, InMemoryDatabase>();
+else
+    builder.Services.AddSingleton<IDatabase>(_ => new XlsxDatabase(dataDir));
 
 // ── App pipeline ──────────────────────────────────────────────────────────────
 var app = builder.Build();

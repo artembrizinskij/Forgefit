@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+server/Forgefit.Api/bin/
+server/Forgefit.Api/obj/
+
+# Database files (xlsx — contains user data)
+server/Forgefit.Api/data/
+data/
+
+# Environment
+.env
+*.env.local
+
+# OS
+.DS_Store
+Thumbs.db

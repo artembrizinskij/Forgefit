@@ -14,6 +14,10 @@ services:
       JWT_SECRET: "${JWT_SECRET:-change-me-in-production}"
       JWT_EXPIRES_IN: "${JWT_EXPIRES_IN:-7d}"
       CORS_ORIGIN: "${CORS_ORIGIN:-http://localhost}"
+      DB_TYPE: "xlsx"
+      DB_DATA_DIR: "/app/data"
+    volumes:
+      - forgefit_data:/app/data   # xlsx files persist across restarts
     # Not exposed to host — nginx proxies /api/
     expose:
       - "3000"
@@ -39,3 +43,6 @@ services:
 networks:
   forgefit:
     driver: bridge
+
+volumes:
+  forgefit_data:   # persistent xlsx storage
