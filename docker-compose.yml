@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+  # ── Backend API ──────────────────────────────────────────────────────────
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: forgefit-api
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_URLS: "http://0.0.0.0:3000"
+      ASPNETCORE_ENVIRONMENT: "Production"
+      JWT_SECRET: "${JWT_SECRET:-change-me-in-production}"
+      JWT_EXPIRES_IN: "${JWT_EXPIRES_IN:-7d}"
+      CORS_ORIGIN: "${CORS_ORIGIN:-http://localhost}"
+      DB_TYPE: "xlsx"
+      DB_DATA_DIR: "/app/data"
+    volumes:
+      - forgefit_data:/app/data   # xlsx files persist across restarts
+    # Not exposed to host — nginx proxies /api/
+    expose:
+      - "3000"
+    networks:
+      - forgefit
+
+  # ── Frontend (nginx + Vue SPA) ───────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: "/api"
+    container_name: forgefit-frontend
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-80}:80"
+    depends_on:
+      - server
+    networks:
+      - forgefit
+
+networks:
+  forgefit:
+    driver: bridge
+
+volumes:
+  forgefit_data:   # persistent xlsx storage
