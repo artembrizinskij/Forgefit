@@ -3,7 +3,7 @@ name: Build & Deploy to Production
 on:
   push:
     branches:
-      - master
+      - main
 
 # Только один деплой одновременно; новый пуш отменяет предыдущий
 concurrency:
